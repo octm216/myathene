@@ -1,0 +1,67 @@
+var value;
+var $date;
+
+String.prototype.replaceAt = function(index,character){
+    return this.substr(0,index) + character + this.substr(index+character.length);
+}
+
+var date = {
+    init:function(objDate){
+        $date = objDate;
+        this.bind();
+    },
+
+    bind:function(){
+        $date.on('focus', this.syncInput)
+            .on('input', this.syncInput)
+            .on('change', this.syncInput)    
+            .on('blur', this.syncInput)
+            .on('keydown', this.syncInput)
+            .on('keyup', this.syncInput)
+            .on('click', this.syncInput)
+    },
+
+    transformDisplay:function(val,key){
+        //Strip all non-numbers
+        var displayVal = val.replace(/[^0-9|\\*]/g,'');
+        displayVal = displayVal.substr(0,8);
+        if(displayVal.replace('/','').length>2)
+                displayVal = displayVal.slice(0,2) + "/" + displayVal.slice(2);
+
+        if(displayVal.replace('/','').length >= 5)
+            displayVal = displayVal.slice(0,5) + "/" + displayVal.slice(5);
+
+            return displayVal;
+    },
+
+    transformValue:function(val){
+        if( typeof value != 'string')
+        {value = "";}
+
+        if(!val){
+            value = null;
+            return;
+        }
+
+        var cleanVal = val.replace(/[^0-9|\\*]/g, '');
+        cleanVal = cleanVal.substr(0,8);
+
+        for (i =0, l = cleanVal.length; i<l; i++) {
+            if(/[0-9]/g.exec(cleanVal[i])){
+                value = value.replaceAt(i,cleanVal[i])
+            }
+        } 
+        value = value.substr(0,cleanVal.length);
+    },
+
+    syncInput:function(){
+        var key = 0;
+        if(event)
+            key = event.keyCode || event.charCode;
+        var $input = $(this);
+        var val = $(this).val();
+        var displayVal = date.transformDisplay(val,key);
+        date.transformValue(val);
+        $input.val(displayVal);
+    },
+};

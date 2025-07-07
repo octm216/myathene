@@ -1,0 +1,95 @@
+var value;
+//var $phone = $('#ssn');
+//var $phoneVal = $('#ssn-val');
+//https://codepen.io/ashblue/pen/LGeqxx
+var $phone;
+
+String.prototype.replaceAt=function(index, character) {
+    return this.substr(0, index) + character + this.substr(index+character.length);
+}
+
+var phone = {
+  init: function (objPhone) {
+    $phone=objPhone;
+    this.bind();
+  },
+  
+  bind: function () {
+    $phone.on('focus', this.syncInput)
+      .on('input', this.syncInput)
+      .on('change', this.syncInput)
+      .on('blur', this.syncInput)
+      .on('keydown', this.syncInput)
+      .on('keyup', this.syncInput)
+      .on('click', this.syncInput);
+  },
+  
+  transformDisplay: function (val) {
+    // Strip all non numbers
+    //debugger;
+    var displayVal = val.replace(/[^0-9]/g, '');
+    if(displayVal.substring(0,1) && displayVal.substring(0,1) == '1'){
+      if(displayVal.length == 1)
+        displayVal = displayVal.substring(0,1).replace('1', '');
+      else
+        displayVal = displayVal.substring(1,displayVal.length);
+    }
+    displayVal = displayVal.substring(0, 10);
+    
+    // Inject dashes
+    if (displayVal.length >= 4) {
+      displayVal = displayVal.slice(0, 3) + '-' + displayVal.slice(3);
+    }
+    
+    if (displayVal.length >= 8) {
+      displayVal = displayVal.slice(0, 7) + '-' + displayVal.slice(7);
+    }
+        
+    // Replace all numbers with astericks
+    //displayVal = displayVal.replace(/[0-9]/g, '*');
+    
+    return displayVal;
+  },
+  
+  transformValue: function (val) {
+    if (typeof value !== 'string') {
+      value = "";
+    }
+    
+    if (!val) {
+      value = null;
+      return;
+    }
+    
+    var cleanVal = val.replace(/[^0-9|\\*]/g, '');
+    cleanVal = cleanVal.substr(0, 9);
+
+    for (i = 0, l = cleanVal.length; i < l; i++) {
+      if (/[0-9]/g.exec(cleanVal[i])) {
+       // console.log('replaced', i, cleanVal[i]);
+        value = value.replaceAt(i, cleanVal[i]);
+      }
+    }
+    
+    value = value.substr(0, cleanVal.length);
+  },
+  
+  syncInput: function () {
+    var $input = $(this);
+    var val = $(this).val();
+    var displayVal = phone.transformDisplay(val);
+    phone.transformValue(val);
+    
+    //this.setSelectionRange(val.length, val.length);
+    
+    $input.val(displayVal);
+    //$phoneVal.val(value);
+    
+    //console.log('value set', displayVal);
+  },
+  
+  syncValue: function () {
+    
+  },
+};
+

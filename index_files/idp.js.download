@@ -1,0 +1,153 @@
+var conversationId = '';
+var questionSetId = '';
+var runningQuestionCount = 0;
+
+class IdpUtil {
+    constructor(questionUrl,validateQuestionUrl,divParent='divATH_Idp_Questions') {
+        this.loadDetails = function (callbackQuestionSuccess, callbackQuestionError,firstName, lastName, simulationTypeSelectID='divATH_Idp_Simulation_Type' ) {
+            let ajax_payload = {
+                "Person": {
+                    "Name": {
+                        "FirstName": firstName,
+                        "LastName": lastName
+                    }
+                }
+            };
+
+            let simulationType = '';
+            if(simulationTypeSelectID && simulationTypeSelectID!='' && $('#'+simulationTypeSelectID).length && $('#'+simulationTypeSelectID).val()){
+                simulationType = $('#'+simulationTypeSelectID).val();
+                ajax_payload.Settings = {
+                    "Mode": "simulated",
+                    "SimulationType": simulationType,
+                    "Locale": "en_US"
+                };
+            }
+            
+
+            $.ajax({
+                type: "POST",
+                url: questionUrl,
+                contentType: 'application/json; charset=utf-8',
+                crossDomain: true,
+                data: JSON.stringify(ajax_payload)
+            })
+            .done(function (data) {
+                
+                if(data && data.Status!=undefined && data.Status.TransactionStatus!=undefined && data.Status.TransactionStatus == "error" || data.Status.TransactionStatus == "failed"){
+                    callbackQuestionSuccess(data);
+                }
+                else{
+                    let result = data;
+                    let transactionId = result.Status.RequestId;
+                    let conversationId = result.Status.ConversationId;
+                    let questionSetId = result.Products[0].QuestionSet.QuestionSetId;
+                    let lbl = '';
+                    let rdb = '';
+                    $.each(result.Products[0].QuestionSet.Questions, function (index, value) {                    
+                        questionCount = index + 1;
+                        let questionId = value.QuestionId;
+                        let lbl_name = 'lbl_'+value.QuestionId;
+                        let questionStatement = index+1 + '. ' + value.Text.Statement;
+                        lbl = '<div class="form-group my-3 form-checkbox-radio-list" ><label class="idProofing-question form-label" id='+lbl_name+' name='+lbl_name+'>'+questionStatement+'</label>';		
+                        rdb = '';
+                        $.each(value.Choices, function (index, value) {					
+                            let radioName = 'Question_' +questionCount;
+                            let radioId = 'Question_' +questionSetId+'_'+String(questionId)+'_'+(index+1);
+                            let choiceId = String(value.ChoiceId);
+                            let param1 = "'"+questionSetId+"'";
+                            let param2 = "'"+questionId+"'";
+                            let param3 = "'"+choiceId+"'";
+                            let param4 = "'"+(index + 1)+"'";
+                            let radioValue = questionSetId+'~'+questionId+'~'+choiceId+'~'+conversationId;
+                            let method = 'captureSelectedValue('+param1+','+param2+','+param3+','+param4+')';
+                            rdb = rdb + "<div class='customRadioCheckBoxWrap form-check idProofing-answers'>"+
+                                        "<div class='form-check custom-control custom-radio '>"+
+                                            "<input type='radio' class='custom-control-input form-check-input' id="+radioId+" name="+radioName+" value="+radioValue+" />"+
+                                            //"<label class='custom-control-label form-check-label' for="+radioId+" onchange="+method+"> "+value.Text.Statement+" </label>" +
+                                            "<label class='custom-control-label form-check-label' for="+radioId+"> "+value.Text.Statement+" </label>" +
+                                        "</div></div>";
+                        });		
+                        $('#'+divParent).append(lbl + rdb + '</div>');
+                    });                                   
+                    callbackQuestionSuccess(data);
+                }
+                
+            })
+            .fail(function (jqXHR, textStatus, errorThrown) {                 
+                callbackQuestionError(jqXHR, textStatus, errorThrown);
+            });
+        };
+        this.validateIdProofing = function (callbackIdProofingValidationSuccess, callbackIdProofingValidationError, fname = '', lname = '', simulationTypeSelectID='divATH_Idp_Simulation_Type' ) {
+
+            let simulationType = '';
+            let rootObj = new Object();
+            if(simulationTypeSelectID && simulationTypeSelectID!='' && $('#'+simulationTypeSelectID).length && $('#'+simulationTypeSelectID).val()){
+                simulationType = $('#'+simulationTypeSelectID).val();
+                rootObj.Settings = {
+                        "Mode": "simulated",
+                        "SimulationType": simulationType,
+                        "Locale": "en_US"
+                    };
+            }
+            rootObj.Person = {
+                "Name": {
+                    "FirstName": firstName,
+                    "LastName": lastName
+                }
+            }
+            rootObj.Answers = new Object();
+
+            for (let i = 1; i <= questionCount; i++) {
+                let data = $("input:radio[name='Question_" + i + "']:checked").val();
+                let splitData = data.split('~');
+                conversationId = splitData[3];
+                questionSetId = splitData[0];
+                break;
+            }
+            //rootObj.Settings.ConversationId = conversationId;
+            rootObj.Answers.QuestionSetId = questionSetId;
+            rootObj.Answers.Questions = [];
+            rootObj.first_name = fname;
+            rootObj.last_name = lname;
+            for (let i = 1; i <= questionCount; i++) {
+                let data = $("input:radio[name='Question_" + i + "']:checked").val();
+                let splitData = data.split('~');
+                let questions = new Object();
+                questions.QuestionId = splitData[1];
+                questions.Choices = [];
+                let choiceOpt = new Object();
+                let choice = splitData[2];
+                choiceOpt.Choice = choice;
+                questions.Choices.push(choiceOpt);
+                rootObj.Answers.Questions.push(questions);
+            }
+            rootObj.conversationId = conversationId;
+
+
+            let sendInfo = JSON.stringify(rootObj);
+
+            $.ajax({
+                type: "POST",
+                url: validateQuestionUrl,
+                contentType: 'application/json; charset=utf-8',
+                crossDomain: true,
+                data: sendInfo
+            })
+            .done(function (data) {       
+                if(data == '' || data == undefined || data == null){
+                    console.log('Error in response');
+                }
+                else            
+                    callbackIdProofingValidationSuccess(data); 
+            })
+	        .fail(function (jqXHR, textStatus, errorThrown) { 
+                callbackIdProofingValidationError(jqXHR, textStatus, errorThrown); 
+            });
+        };
+        this.runningQuestionCountUpdate = function () {
+            runningQuestionCount++
+            return runningQuestionCount;
+        };
+    }
+}

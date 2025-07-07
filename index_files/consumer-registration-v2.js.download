@@ -1,0 +1,1045 @@
+const GENERIC_REGISTRATION_ERROR_ID = 8;
+const INCORRECT_ANSWER_ERROR_CODE = 200;
+var defaultCancel = "/signup",
+    apiUserValidate = "/live/consumer_api/registration/user/validate",          // Personal and Agreement
+    apiIdpQuestion = '/live/consumer_api/registration/idp/questions',           // IDP
+    apiIdpAnswer = '/live/consumer_api/registration/idp/questions/answers',     // IDP
+    apiUserSignup = "/live/consumer_api/registration/user/signup",              // Contact, User, and Password
+    resendTokenUrl = "/live/consumer_api/registration/resendtoken",             // possibly update to /user/resendtoken (still needed for new flow)
+    apiSignupConfirm = "/live/consumer_api/registration/user/signup/confirm",   // Confirm Registration?
+    idproofing,
+    questionCount = 0,
+    radioNames = [],
+    firstName,
+    lastName,
+    u_ssn,
+    u_dob,
+    contract_no,
+    recaptch_success = false,
+    email,
+    phone_number,
+    userId = "",
+    password,
+    secretVal;
+
+let page_action = {
+    "btnUserValidate": {
+        "action": "proccessUserValidate",
+        "focus": "#step2",
+        "hideDiv": "#divUserValidate",
+        "showDiv": "#divATH_Idp",
+        "lnkUserValidate_cancel": defaultCancel,
+        "description": "On Clicking continue button, calls proccessUserValidate method"
+    },
+    "divATH_Idp_btn_next": {
+        "action": "processIdp",
+        "focus": "#step3",
+        "hideDiv": "#divATH_Idp",
+        "showDiv": "#divUserSignup",
+        "lnkIdProff_cancel": defaultCancel,
+        "description": "On Clicking continue button, calls processIdp method"
+    },
+    "btnUserSignup": {
+        "action": "processUserSignup",
+        "focus": "#step4",
+        "hideDiv": "#divUserSignup",
+        "showDiv": "#divSignupConfirm",
+        "lnkUserSignup_cancel": defaultCancel,
+        "description": "On Clicking btnUserSignup continue button, calls processUserSignup method"
+    },
+    "btnSignupConfirm": {
+        "action": "processSignupConfirm",
+        "focus": "",
+        "hideDiv": "#divSignupConfirm",
+        "showDiv": "",
+        "lnkSignupConfirm_cancel": "/myathene-login",
+        "description": "On Clicking btnSignupConfirm continue button, calls processSignupConfirm method"
+    }
+}
+
+
+/**
+ * Class to handle user flow actions.
+ */
+class UserFlowHandler {
+
+    constructor() {
+        this.proccessUserValidate = this.createProcessFunction(proccessUserValidate);
+        this.processIdp = this.createProcessFunction(processIdp);
+        this.processUserSignup = this.createProcessFunction(processUserSignup);
+        this.processSignupConfirm = this.createProcessSignupConfirmFunction();
+        this.processEmailVerifyLockClose = this.createProcessEmailVerifyLockCloseFunction();
+    }
+
+    /**
+     * Creates a function to process user flow actions.
+     *
+     * @param {Function} processFunction - The function to process the user flow action.
+     * @returns {Function} The created function.
+     */
+    createProcessFunction(processFunction) {
+        return function (hideDiv, showDiv, focus) {
+            processFunction(hideDiv, showDiv);
+        };
+    }
+
+    /**
+     * Creates a function to process the signup confirmation.
+     *
+     * @returns {Function} The created function.
+     */
+    createProcessSignupConfirmFunction() {
+        return function (hideDiv, showDiv, focus) {
+            if ($("#frmAthSignupConfirm").valid()) {
+                let sendInfo = {
+                    userid: userId,
+                    token: $('#verificationCode').val().replace(/\s/g, '')
+                };
+                hideUserAlertErrorDiv();
+                post(apiSignupConfirm, "POST", sendInfo, "application/json; charset=utf-8", true, callbackTokenValidationSuccess, callbackTokenValidationError, false);
+            }
+        };
+    }
+
+    /**
+     * Creates a function to handle email verification lock close.
+     *
+     * @returns {Function} The created function.
+     */
+    createProcessEmailVerifyLockCloseFunction() {
+        return function (hideDiv, showDiv, focus) {
+            window.location.href = "/myathene-login";
+        };
+    }
+
+    /**
+     * Hides the current div and shows the next div in the user flow.
+     */
+    static nextStep() {
+        $(this.hideDiv).slideUp();
+        if ($(this.showDiv).hasClass('d-none')) {
+            $(this.showDiv).removeClass('d-none');
+        }
+        $(this.showDiv).slideDown();
+        $(this.focus).focus();
+        window.scrollTo({ top: 1, left: 1, behavior: 'smooth' });
+    }
+}
+
+$(document).ready(function () {
+    initializeForms();
+});
+
+/**
+ * Initializes the forms and sets up the necessary utilities and steps.
+ */
+function initializeForms() {
+    setUpUtilities();           // General Utilities
+    setUpUserValidateForm();    // Step 1
+    setupIdpQuestions();        // Step 2
+    setUpUserSignupForm();      // Step 3
+    setUpSignupConfirmForm();   // Step 4
+}
+
+/**
+ * Sets up general utilities for the page.
+ * This includes hiding sections, setting up button click handlers, toggling password visibility, and setting up cancel links.
+ */
+function setUpUtilities() {
+    $("section.athene-connect-container").hide();
+
+    $(":button").click(function (event) {
+        let btnId = this.id;
+        if (btnId !== 'btnCloseModalX' && btnId !== 'btnCloseModalClose') {
+            let actions = page_action[btnId];
+            let call_function = actions['action'];
+            UserFlowHandler.hideDiv = actions['hideDiv'];
+            UserFlowHandler.showDiv = actions['showDiv'];
+            UserFlowHandler.focus = actions['focus'];
+            let handler = new UserFlowHandler();
+            handler[call_function](UserFlowHandler.hideDiv, UserFlowHandler.showDiv, UserFlowHandler.focus);
+        }
+    });
+
+    $(".athene-eye").on("click keydown", function (event) {
+        if ((event.type === 'click') || (event.type == 'keydown' && event.which === 13)) {
+            $(this).toggleClass("fa-eye-slash fa-eye");
+            let newConfirmPassword = $(this).siblings('input');
+            if (newConfirmPassword.attr("type") === "password") {
+                newConfirmPassword.attr("type", "text");
+            } else {
+                newConfirmPassword.attr("type", "password");
+            }
+        }
+    });
+
+    $.each(page_action, function (key, value) {
+        $.each(page_action[key], function (k, v) {
+            if (k.match("^lnk") && k.match("cancel$")) {
+                $("#" + k).attr('href', v);
+            }
+        });
+    });
+
+}
+
+/**
+ * Handles displaying an error message in the generic error alert div.
+ *
+ * @param {string} [errorMsg=getGenericErrorMsg(GENERIC_REGISTRATION_ERROR_ID)] - The error message to display.
+ */
+function handleError(errorMsg = getGenericErrorMsg(GENERIC_REGISTRATION_ERROR_ID)) {
+    if (errorMsg === '') {
+        return;
+    }
+    $("#divGenericErrAlert").removeClass('d-none').attr('role', 'alert').addClass('ath-analytics-alert-show');
+    $("#strongGenericErrAlert").html(errorMsg);
+    $('html, body').animate({
+        scrollTop: 0
+    }, 0);
+}
+
+/**
+ * Hides the generic error alert div and clears its content.
+ */
+function hideUserAlertErrorDiv() {
+    $("#divGenericErrAlert").removeAttr('role').addClass('d-none').removeClass('ath-analytics-alert-show');
+    $("#strongGenericErrAlert").html("");
+}
+
+//////////////////////////////////////////////////////////////////////
+//  Personal Identification and User Agreement (UserValidate)
+//////////////////////////////////////////////////////////////////////
+
+/**
+ * Sets up the user validation form.
+ * Initializes SSN and date input fields, sets up date picker, handles checkbox interactions,
+ * sets up Lexus Nexus dropdown values, and configures form validation.
+ */
+function setUpUserValidateForm() {
+    // Initialize SSN and date input fields
+    ssn.init($("#u_ssn"));
+    date.init($("#u_dob"));
+
+    // Set up date picker for date of birth input
+    $('#u_dob').datepicker({
+        autoclose: true,
+        endDate: moment().format('MM/DD/YYYY')
+    });
+
+    // Handle date change event for date picker
+    $('#u_dob').datepicker().on('changeDate', function () {
+        handleContinueBtnEnableForUserValidate();
+    });
+
+    // Focus on date of birth input when calendar icon is clicked
+    $('#u_dob-cal-icon').click(function () {
+        $("#u_dob").focus();
+    });
+
+    // Handle checkbox interactions for user agreement
+    $("#chkBoxUserAgreement, #chkBoxUserAgreementLabel, #chkBoxUserAgreementWrapper").on('click', function () {
+        $('#chkBoxUserAgreement').each(function () {
+            let check = !$('#chkBoxUserAgreement').prop('checked');
+            $('#chkBoxUserAgreement').prop('checked', check);
+        });
+        handleContinueBtnEnableForUserValidate();
+    });
+
+    // Set up Lexus Nexus dropdown values
+    setUpLexusNexusDropDownValues();
+
+    // Configure form validation
+    $("#frmUserValidate").validate({
+        onkeyup: function (element, event) {
+            this.element(element);
+            handleContinueBtnEnableForUserValidate(event);
+        },
+        rules: {
+            u_ssn: {
+                g_validate_reg_exp: {
+                    'regex': /^[0-9]{3}([ -]?)[0-9]{2}\1[0-9]{4}$/,
+                    'message': '',
+                    'required': true
+                }
+            },
+            u_dob: {
+                g_validate_reg_exp: {
+                    'regex': /^(0[1-9]|1[012])[- /.](0[1-9]|[12][0-9]|3[01])[- /.](19|20)\d{2}$/,
+                    'message': 'Use mm/dd/yyyy',
+                    'required': true
+                }
+            },
+            contract_no: {
+                g_validate_reg_exp: {
+                    'regex': /^.{6,}$/,
+                    'message': 'Please enter a valid contract number.',
+                    'required': true
+                }
+            },
+        },
+        highlight: function (element) {
+            $(element.form).find("label[for=" + element.id + "]").addClass("text-danger");
+            $(element).addClass("border border-danger");
+        },
+        unhighlight: function (element) {
+            $(element.form).find("label[for=" + element.id + "]").removeClass("text-danger");
+            $(element).removeClass("border-danger");
+        },
+        errorPlacement: function (error, element) {
+            let inputGroupElements = element.siblings('.input-group-text');
+            if (inputGroupElements && inputGroupElements.length > 0) {
+                error.insertAfter(inputGroupElements[inputGroupElements.length - 1]);
+            } else {
+                error.insertAfter(element);
+            }
+        }
+    });
+}
+
+
+/**
+ * Callback function for successful reCAPTCHA verification.
+ * Sets the reCAPTCHA success flag to true and enables the continue button for user validation.
+ */
+function recaptchaCallbackVerifed() {
+    recaptch_success = true;
+    handleContinueBtnEnableForUserValidate();
+}
+
+/**
+ * Callback function for reCAPTCHA timeout or expiration.
+ * Sets the reCAPTCHA success flag to false and enables the continue button for user validation.
+ */
+function recaptchaCallbackTimeout() {
+    recaptch_success = false;
+    handleContinueBtnEnableForUserValidate();
+}
+
+/**
+ * Initializes the reCAPTCHA widget and sets up the necessary callbacks.
+ * Renders the reCAPTCHA widget with the site key and action.
+ */
+var recaptchaCallback = function () {
+    secretVal = grecaptcha.enterprise.render('secret1', {
+        'sitekey': Portal.Configs[window.location.hostname]['G_RECAPTCHA_SITE_KEY'],
+        'callback': recaptchaCallbackVerifed,
+        'expired-callback': recaptchaCallbackTimeout,
+        'action': 'submit',
+    });
+};
+
+/**
+ * Handles enabling or disabling the "Continue" button for user validation.
+ * The button is enabled if the user agreement checkbox is checked and reCAPTCHA is successful.
+ * If the Enter key is pressed, the button is clicked programmatically.
+ *
+ * @param {Event} event - The event object (optional).
+ */
+function handleContinueBtnEnableForUserValidate(event) {
+    let enableForUserValidate = !get_button_view($("#btnUserValidate"), "btnUserValidate");
+    let agreeChecked = $('#chkBoxUserAgreement').is(':checked');
+    if (enableForUserValidate && agreeChecked && recaptch_success) {
+        $('#btnUserValidate').attr('disabled', false);
+        $('#btnUserValidate').removeClass('disabled');
+        if (event) {
+            let keycode = (event.keyCode) ? event.keyCode : event.which;
+            if (keycode === 10 || keycode === 13) {
+                $('#btnUserValidate').click();
+            }
+        }
+    } else {
+        $('#btnUserValidate').attr('disabled', true);
+        $('#btnUserValidate').addClass('disabled');
+    }
+}
+
+/**
+ * Processes user validation by sending an AJAX request with the user's SSN, DOB, and reCAPTCHA token.
+ * On success, advances to IDP questions. On failure, handles the error and resets reCAPTCHA.
+ *
+ * @param {string} hideDiv - The ID of the div to hide.
+ */
+function proccessUserValidate(hideDiv) {
+    hideUserAlertErrorDiv();
+    let userPoolId = Portal.Configs[window.location.hostname]['PC_USER_POOL_ID'];
+    let clientId = Portal.Configs[window.location.hostname]['PC_CLIENT_ID'];
+	
+    let signupData = {
+        "ssn": $("#u_ssn").val().replace(/-/gi, ""),
+        "dob": $("#u_dob").val(),
+        "contract_no": $("#contract_no").val(),
+        "token": grecaptcha.enterprise.getResponse(secretVal),
+        "device-token": AmazonCognitoAdvancedSecurityData.getData('myathene',userPoolId,clientId)
+    };
+    
+    $.ajax({
+        type: 'POST',
+        url: apiUserValidate,
+        data: JSON.stringify(signupData),
+        contentType: "application/json; charset=utf-8"
+    })
+        .done(function (data) {
+            advanceToIdpQuestions(data);
+        })
+        .fail(function (jqXHR) { 
+            if (jqXHR && jqXHR.responseJSON && jqXHR.responseJSON.msg) {
+                handleError(jqXHR.responseJSON.msg);
+            } else {
+                handleError(getGenericErrorMsg(9));
+            }
+            grecaptcha.enterprise.reset(secretVal);
+            recaptch_success = false;
+            $('#btnUserValidate').addClass('disabled');            
+        });
+}
+
+//////////////////////////////////////////////////////////////////////
+// IDP Questions/Answers
+//////////////////////////////////////////////////////////////////////
+/**
+ * Sets up the IDP questions by disabling the "Next" button initially.
+ */
+function setupIdpQuestions() {
+    $("#divATH_Idp_btn_next").prop("disabled", true);
+}
+
+/**
+ * Advances to the IDP questions or user signup based on the provided data.
+ * If the user is exempted, it skips to the user signup step.
+ * Otherwise, it initializes the ID proofing process and loads the next set of questions.
+ *
+ * @param {Object} data - The data object containing information about the user's exemption status.
+ */
+function advanceToIdpQuestions(data) {
+    firstName = data.first_name;
+    lastName = data.last_name;
+    if (data.manually_id_proofed==='Y') {
+        UserFlowHandler.hideDiv = '#divUserValidate';
+        UserFlowHandler.showDiv = '#divUserSignup';
+    } else {
+        idproofing = new IdpUtil(apiIdpQuestion, apiIdpAnswer);
+        loadNextSetOfQuestions('drpSimulationType');
+    }
+    UserFlowHandler.nextStep();
+}
+
+/**
+ * Loads the next set of IDP questions.
+ * If a simulation type div ID is provided, it uses it to load the questions.
+ *
+ * @param {string} [simulationTypeDivId] - The ID of the simulation type div (optional).
+ */
+function loadNextSetOfQuestions(simulationTypeDivId) {
+    if (simulationTypeDivId) {
+        idproofing.loadDetails(callbackIdProofingQuestionsCheck, showIdpError,firstName, lastName, simulationTypeDivId);
+    } else {
+        idproofing.loadDetails(callbackIdProofingQuestionsCheck, showIdpError,firstName, lastName);
+}
+}
+
+/**
+ * Callback function to check the ID proofing questions.
+ * Collects the names of radio button groups and sets up click handlers to enable the "Next" button
+ * when all questions are answered.
+ *
+ * @param {Object} data - The data object containing the ID proofing questions.
+ */
+function callbackIdProofingQuestionsCheck(data) {
+    radioNames.length = 0;
+    $('input[name*="Question_"]:radio').each(function () {
+        if (!~$.inArray(this.name, radioNames)) radioNames.push(this.name);
+    });
+    $('input[name*="Question_"]:radio').on('click', function () {
+        let enableButton = true;
+        $.each(radioNames, function (index, radioGroupName) {
+            if (!$("input[name='" + radioGroupName + "']:checked").val()) {
+                enableButton = false;
+                return false;
+            }
+        });
+        $("#divATH_Idp_btn_next").prop("disabled", !enableButton);
+    });
+    window.scrollTo({ top: 1, left: 1, behavior: 'smooth' });
+    }
+
+/**
+ * Handles errors during ID proofing.
+ * Logs the error, clears the IDP questions div, and handles specific error codes.
+ * If the error code indicates an incorrect answer, it reloads the questions.
+ * Otherwise, it displays an error message.
+ *
+ * @param {Object} jqXHR - The jQuery XMLHttpRequest object.
+ * @param {string} [textStatus=''] - A string describing the type of error that occurred (optional).
+ * @param {string} [errorThrown=''] - An optional exception object, if one occurred (optional).
+ */
+function showIdpError(jqXHR, textStatus = '', errorThrown = '') {
+    console.log(textStatus, errorThrown);
+    $('#divATH_Idp_Questions').empty();
+    if (jqXHR.status == INCORRECT_ANSWER_ERROR_CODE) {
+        loadNextSetOfQuestions(null);
+        if ($('#divATH_Idp_Simulation_Type').length > 0) {
+            $('#divATH_Idp_Simulation_Type').val($('#divATH_Idp_Simulation_Type option:first').val());
+        }
+        $('#step2').focus();
+    } else if (jqXHR && jqXHR.responseJSON && jqXHR.responseJSON.msg) {
+        handleError(jqXHR.responseJSON.msg);
+        $('#divATH_Idp_btn_next').attr('disabled', true).addClass('disabled');
+    } else {
+        handleError(getGenericErrorMsg(9));
+        $('#divATH_Idp_btn_next').attr('disabled', true).addClass('disabled');
+    }
+}
+
+/**
+ * Callback function to handle ID proofing validation check.
+ * Processes the response data and updates the UI based on the transaction status.
+ * If the status is 'pending', it displays the next set of questions.
+ * If the status is 'passed', it advances to the next step.
+ * If the status is 'error' or 'failed', it shows an error.
+ *
+ * @param {Object} data - The data object containing the ID proofing validation response.
+ */
+function callbackIdProofingValidationCheck(data) {
+    let transactionStatus = data.Status.TransactionStatus;
+
+    if (transactionStatus == 'pending') {
+        $('#divATH_Idp_Questions').empty();
+        let result = data;
+        let conversationId = result.Status.ConversationId;
+        let questionSetId = result.Products[0].QuestionSet.QuestionSetId;
+        let lbl = '';
+        let rdb = '';
+        $.each(result.Products[0].QuestionSet.Questions, function (index, value) {
+            questionCount = index + 1;
+            let questionId = value.QuestionId;
+            let lbl_name = 'lbl_' + value.QuestionId;
+            let questionStatement = idproofing.runningQuestionCountUpdate() + '. ' + value.Text.Statement;
+            lbl = '<div class="col-12 my-3" ><label class="form-label" id=' + lbl_name + ' name=' + lbl_name + '>' + questionStatement + '</label>';
+            rdb = '';
+            $.each(value.Choices, function (i, v) {
+                let radioName = 'Question_' + questionCount;
+                let radioId = 'Question_' + questionSetId + '_' + String(questionId) + '_' + (i);
+                let choiceId = String(v.ChoiceId);
+                let radioValue = questionSetId + '~' + questionId + '~' + choiceId + '~' + conversationId;
+                rdb = rdb + "<div class='form-check col-12'>" +
+                    "<div class='form-check'>" +
+                    "<input type='radio' class='form-check-input' id=" + radioId + " name=" + radioName + " value=" + radioValue + " />" +
+                    "<label class='form-check-label fw-normal' for=" + radioId + "> " + v.Text.Statement + " </label>" +
+                    "</div></div>";
+            });
+            $('#divATH_Idp_Questions').append(lbl + rdb + '</div>');
+        });
+        callbackIdProofingQuestionsCheck(result);
+        $('#sectionIdProff').show();
+        $('#divIdProofing').removeClass('d-none').show();
+        $('#divATH_Idp_Questions').show();
+        $('#step2').focus();
+    } else if (transactionStatus == 'passed') {
+        UserFlowHandler.nextStep();
+    } else if (transactionStatus == 'error' || transactionStatus == 'failed') {
+        showIdpError({ 'status': INCORRECT_ANSWER_ERROR_CODE });
+    }
+}
+
+/**
+ * Processes the ID proofing step.
+ * Hides any user alert error divs and validates ID proofing.
+ * Disables the "Next" button during the validation process.
+ */
+function processIdp() {
+    hideUserAlertErrorDiv();
+    idproofing.validateIdProofing(callbackIdProofingValidationCheck, showIdpError
+        , firstName, lastName);
+    $("#divATH_Idp_btn_next").prop("disabled", true);
+}
+
+//////////////////////////////////////////////////////////////////////
+// Contact, UserID, and Password  (UserSignup)
+//////////////////////////////////////////////////////////////////////
+
+/**
+ * Sets up the user signup form.
+ * Initializes phone input, prevents copy-paste for certain fields, and sets up form validation.
+ */
+function setUpUserSignupForm() {
+    // Initialize phone input
+    phone.init($('#phone'));
+
+    // Prevent copy-paste for email, userid, password, and confirm password fields
+    $('#email, #userid, #regPassword, #regConfirmPassword').bind('copy paste', function (e) {
+        e.preventDefault();
+    });
+
+    // Set up form validation
+    $('#frmUserSignup').validate({
+        onkeyup: function (element, event) {
+            this.element(element);
+            handleContinueBtnEnableForUserSignup(event);
+        },
+        rules: {
+            email: {
+                g_is_valid_email: {
+                    'message': 'Please enter a valid email address.',
+                    'required': true
+                }
+            },
+            phone: {
+                g_validate_reg_exp: {
+                    'regex': /^[0-9]{3}([ -]?)[0-9]{3}\1[0-9]{4}$/,
+                    'message': '',
+                    'required': true
+                }
+            },
+            userid: {
+                validate_user_id: {
+                    'required': true
+                }
+            },
+            regPassword: {
+                validate_password: {
+                    'required': true
+                }
+            },
+            regConfirmPassword: {
+                g_is_elements_same: {
+                    'message': 'Passwords must match',
+                    'equalsTo': { 'ctrl': 'regPassword', 'ignoreCase': false },
+                    'required': true
+                }
+            }
+        },
+        highlight: function (element) {
+            $(element.form).find("label[for=" + element.id + "]").addClass("text-danger");
+            $(element).addClass("border border-danger");
+        },
+        unhighlight: function (element) {
+            $(element.form).find("label[for=" + element.id + "]").removeClass("text-danger");
+            $(element).removeClass("border-danger");
+        },
+        errorPlacement: function (error, element) {
+            let inputGroupElements = element.siblings('.input-group-text');
+            if (inputGroupElements && inputGroupElements.length > 0) {
+                error.insertAfter(inputGroupElements[inputGroupElements.length - 1]);
+            } else {
+                error.insertAfter(element);
+            }
+        }
+    });
+
+    /***********************************************Custom Validator methods*****************************************************/
+
+    /**
+     * Custom validator method for password validation.
+     * Checks for various password strength criteria and updates the UI accordingly.
+     *
+     * @param {string} value - The value of the password field.
+     * @param {HTMLElement} element - The password input element.
+     * @param {Object} param - Additional parameters for validation.
+     * @returns {boolean} True if the password is valid, false otherwise.
+     */
+    $.validator.addMethod("validate_password", function (value, element, param) {
+        let isValidationSuccess = true;
+        let isWhiteSpace = /\s/.test(value);
+        userId = $("#userid").val();
+        let isSameAsUserId = (value.toLowerCase() == userId.toLowerCase());
+        if (value.toLowerCase().search(userId) != -1 && !isSameAsUserId) isSameAsUserId = true;
+
+        let isLengthValid = (value.length >= 8);
+        let isLowerCaseAvailable = /[a-z]/.test(value);
+        let isUpperCaseAvailable = /[A-Z]/.test(value);
+        let isNumberAvailable = /\d/.test(value);
+        let isSpecialCharacterValid = /[~`!@#$%\^&*()+=\-\[\]\\';,/{}|\\":<>\?]/.test(value);
+        let restrictCount = 4;
+
+        isValidationSuccess = checkBasicPasswordStrength(isLengthValid, isValidationSuccess, isWhiteSpace, isSameAsUserId);
+
+        let count = checkAdvancePasswordStrength(isLowerCaseAvailable, isUpperCaseAvailable, isNumberAvailable, isSpecialCharacterValid);
+        if (count >= restrictCount) {
+            $('#lipwdat3char').prop('class', 'verification-success');
+            $('#ipwdcheckat3char').prop('class', 'fas fa-check pe-1');
+            $('#ipwdtimesat3char').prop('class', 'fas fa-times pe-1 d-none');
+        } else {
+            $('#lipwdat3char').prop('class', 'verification-error');
+            $('#ipwdcheckat3char').prop('class', 'fas fa-check pe-1 d-none');
+            $('#ipwdtimesat3char').prop('class', 'fas fa-times pe-1');
+        }
+        if (value == "") return true;
+        return (isValidationSuccess && count >= restrictCount);
+    }, '');
+
+    /**
+     * Custom validator method for user ID validation.
+     * Checks for various user ID criteria and updates the UI accordingly.
+     *
+     * @param {string} value - The value of the user ID field.
+     * @param {HTMLElement} element - The user ID input element.
+     * @param {Object} param - Additional parameters for validation.
+     * @returns {boolean} True if the user ID is valid, false otherwise.
+     */
+    $.validator.addMethod("validate_user_id", function (value, element, param) {
+        let isAlphaValid = /^[0-9a-zA-Z._]+$/.test(value);
+        let isLengthValid = (value.length >= 6 && value.length <= 20);
+        let isSpecialCharacterValid = !/[~`!@#$%\^&*()+=\-\[\]\\';,/{}|\\":<>\?]/.test(value);
+        let isUserIdNotSameAsu_ssn = (value != u_ssn);
+        let isValidationSuccess = true;
+
+        if (isAlphaValid) {
+            $('#li620').prop('class', 'text-success');
+            $('#icheck620').prop('class', 'fas fa-check pe-1');
+            $('#itime620').prop('class', 'fas fa-times pe-1 d-none');
+        } else {
+            $('#li620').prop('class', 'text-danger pt-2 pb-0');
+            $('#icheck620').prop('class', 'fas fa-check pe-1 d-none');
+            $('#itime620').prop('class', 'fas fa-times pe-1');
+            isValidationSuccess = false;
+        }
+        if (isLengthValid) {
+            $('#li620').prop('class', 'text-success');
+            $('#icheck620').prop('class', 'fas fa-check pe-1');
+            $('#itime620').prop('class', 'fas fa-times pe-1 d-none');
+        } else {
+            $('#li620').prop('class', 'text-danger pt-2 pb-0');
+            $('#icheck620').prop('class', 'fas fa-check pe-1 d-none');
+            $('#itime620').prop('class', 'fas fa-times pe-1');
+            isValidationSuccess = false;
+        }
+        if (isSpecialCharacterValid) {
+            $('#lispl').prop('class', 'text-success');
+            $('#icheckspl').prop('class', 'fas fa-check pe-1');
+            $('#itimespl').prop('class', 'fas fa-times pe-1 d-none');
+        } else {
+            $('#lispl').prop('class', 'text-danger pt-2 pb-0');
+            $('#icheckspl').prop('class', 'fas fa-check pe-1 d-none');
+            $('#itimespl').prop('class', 'fas fa-times pe-1');
+            isValidationSuccess = false;
+        }
+        if (isUserIdNotSameAsu_ssn) {
+            $('#liu_ssn').prop('class', 'text-success');
+            $('#ichecku_ssn').prop('class', 'fas fa-check pe-1');
+            $('#itimeu_ssn').prop('class', 'fas fa-times pe-1 d-none');
+        } else {
+            $('#liu_ssn').prop('class', 'text-danger pt-2 pb-0');
+            $('#ichecku_ssn').prop('class', 'fas fa-check pe-1 d-none');
+            $('#itimeu_ssn').prop('class', 'fas fa-times pe-1');
+            isValidationSuccess = false;
+        }
+        if (value == '') return true;
+        return isValidationSuccess;
+    }, '');
+    /***********************************************Custom Validator methods*****************************************************/
+}
+/**
+ * Checks the advanced password strength by validating the presence of lowercase, uppercase, numeric, and special characters.
+ * Updates the UI to reflect the validation status for each criterion.
+ *
+ * @param {boolean} isLowerCaseAvailable - Indicates if the password contains a lowercase letter.
+ * @param {boolean} isUpperCaseAvailable - Indicates if the password contains an uppercase letter.
+ * @param {boolean} isNumberAvailable - Indicates if the password contains a numeric digit.
+ * @param {boolean} isSpecialCharacterValid - Indicates if the password contains a special character.
+ * @returns {number} The count of criteria met by the password.
+ */
+function checkAdvancePasswordStrength(isLowerCaseAvailable, isUpperCaseAvailable, isNumberAvailable, isSpecialCharacterValid) {
+    let count = 0;
+    if (isLowerCaseAvailable) {
+        count++;
+        $('#lipwdlocase').prop('class', 'text-success');
+        $('#lipwdchecklocase').prop('class', 'fas fa-check pe-1');
+        $('#lipwdtimeslocase').prop('class', 'fas fa-times pe-1 d-none');
+    } else {
+        $('#lipwdlocase').prop('class', 'text-danger');
+        $('#lipwdchecklocase').prop('class', 'fas fa-check pe-1 d-none');
+        $('#lipwdtimeslocase').prop('class', 'fas fa-times pe-1');
+    }
+
+    if (isUpperCaseAvailable) {
+        count++;
+        $('#lipwdupcase').prop('class', 'text-success');
+        $('#lipwdcheckupcase').prop('class', 'fas fa-check pe-1');
+        $('#lipwdtimesupcase').prop('class', 'fas fa-times pe-1 d-none');
+    } else {
+        $('#lipwdupcase').prop('class', 'text-danger');
+        $('#lipwdcheckupcase').prop('class', 'fas fa-check pe-1 d-none');
+        $('#lipwdtimesupcase').prop('class', 'fas fa-times pe-1');
+    }
+
+    if (isNumberAvailable) {
+        count++;
+        $('#lipwdnum').prop('class', 'text-success');
+        $('#lipwdchecknum').prop('class', 'fas fa-check pe-1');
+        $('#lipwdtimesnum').prop('class', 'fas fa-times pe-1 d-none');
+    } else {
+        $('#lipwdnum').prop('class', 'text-danger');
+        $('#lipwdchecknum').prop('class', 'fas fa-check pe-1 d-none');
+        $('#lipwdtimesnum').prop('class', 'fas fa-times pe-1');
+    }
+
+    if (isSpecialCharacterValid) {
+        count++;
+        $('#lipwdspl').prop('class', 'text-success');
+        $('#lipwdcheckspl').prop('class', 'fas fa-check pe-1');
+        $('#lipwdtimesspl').prop('class', 'fas fa-times pe-1 d-none');
+    } else {
+        $('#lipwdspl').prop('class', 'text-danger');
+        $('#lipwdcheckspl').prop('class', 'fas fa-check pe-1 d-none');
+        $('#lipwdtimesspl').prop('class', 'fas fa-times pe-1');
+    }
+    return count;
+}
+
+/**
+ * Checks the basic password strength by validating the length, whitespace, and similarity to the user ID.
+ * Updates the UI to reflect the validation status for each criterion.
+ *
+ * @param {boolean} isLengthValid - Indicates if the password length is valid.
+ * @param {boolean} isValidationSuccess - Indicates if the password validation is successful.
+ * @param {boolean} isWhiteSpace - Indicates if the password contains whitespace.
+ * @param {boolean} isSameAsUserId - Indicates if the password is the same as the user ID.
+ * @returns {boolean} True if the basic password strength criteria are met, false otherwise.
+ */
+function checkBasicPasswordStrength(isLengthValid, isValidationSuccess, isWhiteSpace, isSameAsUserId) {
+    if (isLengthValid) {
+        $('#lipwd8ormore').prop('class', 'text-success');
+        $('#ipwd8checkormore').prop('class', 'fas fa-check pe-1');
+        $('#ipwd8timesormore').prop('class', 'fas fa-times pe-1 d-none');
+    } else {
+        $('#lipwd8ormore').prop('class', 'text-danger');
+        $('#ipwd8checkormore').prop('class', 'fas fa-check pe-1 d-none');
+        $('#ipwd8timesormore').prop('class', 'fas fa-times pe-1');
+        isValidationSuccess = false;
+    }
+    if (!isWhiteSpace && !isSameAsUserId) {
+        $('#lipwdspaces').prop('class', 'text-success');
+        $('#lipwdcheckspaces').prop('class', 'fas fa-check pe-1');
+        $('#lipwdtimesspaces').prop('class', 'fas fa-times pe-1 d-none');
+    } else {
+        $('#lipwdspaces').prop('class', 'text-danger');
+        $('#lipwdcheckspaces').prop('class', 'fas fa-check pe-1 d-none');
+        $('#lipwdtimesspaces').prop('class', 'fas fa-times pe-1');
+        isValidationSuccess = false;
+    }
+    return isValidationSuccess;
+}
+
+/**
+ * Handles enabling or disabling the "Continue" button for user signup.
+ * The button is enabled if the form is valid and the Enter key is pressed.
+ *
+ * @param {Event} event - The event object (optional).
+ */
+function handleContinueBtnEnableForUserSignup(event) {
+    let enableForUserSignup = !get_button_view($("#btnUserSignup"), "btnUserSignup");
+    if (enableForUserSignup) {
+        $('#btnUserSignup').attr('disabled', false);
+        $('#btnUserSignup').removeClass('disabled');
+        if (event) {
+            let keycode = (event.keyCode) ? event.keyCode : event.which;
+            if (keycode === 10 || keycode === 13) {
+                $('#btnUserSignup').click();
+            }
+        }
+    } else {
+        $('#btnUserSignup').attr('disabled', true);
+        $('#btnUserSignup').addClass('disabled');
+    }
+}
+
+/**
+ * Processes the user signup by sending an AJAX request with the user's email, phone, user ID, and password.
+ * On success, advances to the next step. On failure, handles the error.
+ *
+ * @param {string} hideDiv - The ID of the div to hide.
+ */
+function processUserSignup(hideDiv) {
+    hideUserAlertErrorDiv();
+    email = $('#email').val();
+    phone_number = $('#phone').val();
+    $("#codeSentEmail1,#codeSentEmail2").text(getMaskedEmail(email, '*', "3"));
+    userId = $("#userid").val();
+    password = $('#regPassword').val();
+    $('#divTokenClose').hide();
+    if (!$("divTokenClose").hasClass("d-none")) {
+        $("divTokenClose").addClass("d-none");
+    }
+    let userdata = {
+        "email": email,
+        "phone": phone_number,
+        "userid": userId,
+        "password": password,
+        "forter_token": forter_token
+    };
+    $.ajax({
+        type: 'POST',
+        url: apiUserSignup,
+        data: JSON.stringify(userdata),
+        contentType: "application/json; charset=utf-8"
+    })
+        .done(function (data) {
+            UserFlowHandler.nextStep();
+        })
+        .fail(function (jqXHR) {
+        if (jqXHR && jqXHR.responseJSON && jqXHR.responseJSON.msg) {
+            handleError(jqXHR.responseJSON.msg);
+        } else {
+            handleError(getGenericErrorMsg(9));
+            }
+        });
+}
+
+//////////////////////////////////////////////////////////////////////
+//  (SignupConfirm)
+//////////////////////////////////////////////////////////////////////
+/**
+ * Sets up the signup confirmation form.
+ * Binds the click event for the resend verification code button and sets up form validation.
+ */
+function setUpSignupConfirmForm() {
+    $("#verificationCodeResend").bind('click', function () {
+        hideUserAlertErrorDiv();
+        let sendInfo = {
+            userid: userId
+        };
+        $('#verificationCode').val('');
+        post(resendTokenUrl, "POST", sendInfo, "application/json; charset=utf-8", false, callbackResendTokenValidationSuccess, callbackResendTokenValidationError);
+        return false;
+    });
+
+    $('#verificationCode').on('keypress',function(event) {
+        if(e.which == 13 && $('#verificationCode').val().length > 0) {
+            handleContinueBtnEnableForSignupConfirm(event);
+        }
+    });
+
+    $('#frmAthSignupConfirm').on('submit',function(e) {
+        e.preventDefault();
+    });
+
+    $('#frmAthSignupConfirm').validate({
+        onkeyup: function (element, event) {
+            this.element(element);
+            handleContinueBtnEnableForSignupConfirm(event);
+        },
+        rules: {
+            verificationCode: {
+                g_validate_reg_exp: {
+                    'regex': /^[0-9]{1,10}$/,
+                    'message': '',
+                    'required': true
+                }
+            }
+        },
+        highlight: function (element) {
+            $(element.form).find("label[for=" + element.id + "]").addClass("text-danger");
+            $(element).addClass("border border-danger");
+        },
+        unhighlight: function (element) {
+            $(element.form).find("label[for=" + element.id + "]").removeClass("text-danger");
+            $(element).removeClass("border-danger");
+        },
+        errorPlacement: function (error, element) {
+            let inputGroupElements = element.siblings('.input-group-text');
+            if (inputGroupElements && inputGroupElements.length > 0) {
+                error.insertAfter(inputGroupElements[inputGroupElements.length - 1]);
+            } else {
+                error.insertAfter(element);
+            }
+        }
+    });
+}
+
+/**
+ * Handles enabling or disabling the "Continue" button for signup confirmation.
+ * The button is enabled if the form is valid and the Enter key is pressed.
+ *
+ * @param {Event} event - The event object (optional).
+ */
+function handleContinueBtnEnableForSignupConfirm(event) {
+    let enableForSignupConfirm = !get_button_view($("#btnSignupConfirm"), "btnSignupConfirm");
+    if (enableForSignupConfirm) {
+        $('#btnSignupConfirm').attr('disabled', false);
+        $('#btnSignupConfirm').removeClass('disabled');
+        if (event) {
+            let keycode = (event.keyCode) ? event.keyCode : event.which;
+            if (keycode === 10 || keycode === 13) {
+                $('#btnSignupConfirm').click();
+            }
+        }
+    } else {
+        $('#btnSignupConfirm').attr('disabled', true);
+        $('#btnSignupConfirm').addClass('disabled');
+    }
+}
+
+/**
+ * Callback function for successful token validation.
+ * Sets a cookie indicating registration completion and redirects to the login page.
+ *
+ * @param {Object} response - The response object from the server.
+ */
+function callbackTokenValidationSuccess(response) {
+    setCookie('ath_c_reg', "Registration complete. Please login below.", 2, '');
+    window.location.href = "/myathene-login";
+}
+
+/**
+ * Callback function for token validation error.
+ * Handles the error by displaying an appropriate message.
+ *
+ * @param {Object} jqXHR - The jQuery XMLHttpRequest object.
+ * @param {string} textStatus - A string describing the type of error that occurred.
+ * @param {string} errorThrown - An optional exception object, if one occurred.
+ */
+function callbackTokenValidationError(jqXHR, textStatus, errorThrown) {
+    if (jqXHR && jqXHR.responseJSON && jqXHR.responseJSON.msg) {
+        handleError(jqXHR.responseJSON.msg);
+    } else {
+        handleError(getGenericErrorMsg(9));
+    }
+}
+
+/**
+ * Callback function for successful resend token request.
+ * Displays a modal indicating that the verification code has been resent.
+ *
+ * @param {Object} response - The response object from the server.
+ */
+function callbackResendTokenValidationSuccess(response) {
+    $('#resendCodeModal').modal('show');
+}
+
+/**
+ * Callback function to handle token validation errors during resend token requests.
+ * Handles the error by displaying an appropriate message.
+ *
+ * @param {Object} jqXHR - The jQuery XMLHttpRequest object.
+ * @param {string} textStatus - A string describing the type of error that occurred.
+ * @param {string} errorThrown - An optional exception object, if one occurred.
+ */
+function callbackResendTokenValidationError(jqXHR, textStatus, errorThrown) {
+    if (jqXHR && jqXHR.responseJSON && jqXHR.responseJSON.msg) {
+        handleError(jqXHR.responseJSON.msg);
+    } else {
+        handleError(getGenericErrorMsg(9));
+    }
+}
+
+
+/**
+ * Populates dropdown elements with values from the mfaLockedItems array.
+ * Removes the 'divLockedUserId' element if it exists.
+ */
+function setUpLexusNexusDropDownValues() {
+    /**
+     * Populates a dropdown element with values from an array.
+     *
+     * @param {jQuery} dropdownElement - The jQuery object representing the dropdown element.
+     * @param {Array} valuesArray - The array of values to populate the dropdown with.
+     */
+    if ($('#divSimulationType').length > 0) {
+        populateDropdownFromArray($("#drpSimulationType"), mfaLockedItems);
+    }
+    if ($('#divATH_Idp_Simulation_Type').length > 0) {
+        populateDropdownFromArray($("#divATH_Idp_Simulation_Type"), mfaLockedItems);
+    }
+
+}

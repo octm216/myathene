@@ -1,0 +1,561 @@
+$(document).ready(function () {
+
+    $(document)
+        .ajaxStart(function () {
+            ath_show_loader();
+        })
+        .ajaxStop(function () {
+            ath_hide_loader();
+        })
+        .ajaxError(function () {
+            ath_hide_loader();
+        });
+
+
+    // Loads binary files required for the application.
+    loadBinaries();
+
+    // Set all input type=password to autocomplete=off
+    $('form').find('input[type=password]').each(function () {
+        $(this).attr('autocomplete', 'off');
+    });
+
+
+
+    // Add class to body when using mouse control
+    document.body.addEventListener('mousedown', function () {
+        document.body.classList.add('using-mouse-control');
+    });
+
+    // Re-enable focus styling when Tab is pressed
+    document.body.addEventListener('keydown', function (event) {
+        if (event.key === 'Tab' || event.which === 9) {
+            document.body.classList.remove('using-mouse-control');
+        }
+    });
+
+    /**
+     * Adds event listeners for 'click' and 'keydown' events to the HTML element with id 'scrollToTop'.
+     * When this element is clicked or 'Enter' key is pressed while it's focused, the page will smoothly scroll to the top.
+     * After the scrolling animation is complete, the focus is set to the element with id 'main-sections' if it's visible.
+     * If 'main-sections' is not visible, the focus is set to the first anchor tag within an element with class 'back-to-previous', if such an anchor tag exists.
+     */
+    $('#scrollToTop').on('click keydown', function () {
+        if ((event.type == 'click') || (event.type == 'keydown' && event.which == 13)) {
+            $('html, body').animate({
+                scrollTop: $("#connect-main-content").offset().top
+            }, 500);
+            if ($("#main-sections").is(':visible')) {
+                $('#main-sections').focus();
+            } else if ($('.back-to-previous a').length != 0) {
+                $('.back-to-previous a').focus();
+            }
+        }
+
+    });
+
+
+    /**
+     * Dynamically sets the minimum height of elements with the classes 'connect-main-content' and 'athene-connect-main'.
+     * The minimum height is calculated as the height of the viewport minus the combined height of the `header` and `footer` elements.
+     */
+    let mainHeight = ($("header").height() + $("footer").height());
+    $('.connect-main-content').css({
+        'min-height': 'calc( 100vh - ' + mainHeight + 'px'
+    })
+    $('.athene-connect-main').css({
+        'min-height': 'calc( 100vh - ' + mainHeight + 'px'
+    })
+
+    /**
+     * Adds event listeners for 'click' and 'keydown' events to the HTML element with id 'user-logout'.
+     * When this element is clicked or 'Enter' key is pressed while it's focused, the logOut function is called.
+     */
+    $('[id="user-logout"]').on('click keydown', function (event) {
+        if ((event.type == 'click') || (event.type == 'keydown' && event.which == 13)) {
+            logOut();
+        };
+    });
+
+
+    /**
+     * Iterates over each element with the class 'alertckeditor'.
+     * If the element does not have any child 'i' elements, an 'i' element with a specific class is prepended to it.
+     * The specific class depends on whether the 'alertckeditor' element's class includes 'alert-info', 'alert-success', 'alert-danger', or 'alert-warning'.
+     */
+    $('.alertckeditor').each(function (index, obj) {
+        if ($(obj).children('i').length === 0) {
+            let divcls = $(obj).attr('class');
+            if (divcls.includes("alert-info")) {
+                $(obj).prepend('<i class="fas fa-info-circle"></i>');
+            } else if (divcls.includes("alert-success")) {
+                $(obj).prepend('<i class="fas fa-check"></i>');
+            } else if (divcls.includes("alert-danger")) {
+                $(obj).prepend('<i class="fas fa-exclamation-triangle"></i>');
+            } else if (divcls.includes("alert-warning")) {
+                $(obj).prepend('<i class="fas fa-exclamation-triangle"></i>');
+            }
+        }
+    });
+
+    // Popover implementation : START
+    /**
+     * Initializes Bootstrap popovers for all elements with the 'data-bs-toggle="popover"' attribute.
+     * Each popover is associated with its trigger element and stored in an array.
+     */
+    let popoverTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="popover"]'))
+    let popoverList = popoverTriggerList.map(function (popoverTriggerEl) {
+        return new bootstrap.Popover(popoverTriggerEl)
+    });
+    console.log('popoverList', popoverList);
+
+    /**
+     * Initializes Bootstrap popovers for all elements within the 'body' that have the 'data-bs-toggle="popover"' attribute.
+     */
+    $('body').popover({
+        selector: '[data-bs-toggle="popover"]'
+    });
+    // Popover implementation : END
+
+    if (getCookie('sw_acct') == "true") {
+        if (window.location.href.includes('connect') && app.role != 'Associate') {
+            sw_acct = true;
+            showSwitchSelectAccount(app.logged_in_user_id);
+        }
+    }
+
+    $('#popUpBlockerModal').on('shown.bs.modal', function () {
+        $('#popUpBlockerModal').trigger('focus');
+    }).on('hide.bs.modal', function () {
+        resetPopupBlockerModal();
+    });
+
+    // Fix for empty strips in UI
+    // Find all <div> elements with the class 'stripe' within the selected section
+    $('section.zebra').find('div.stripe').each(function() {
+        // Check if the <div> element has no child elements or only whitespace
+        if ($(this).text().trim().length === 0) {
+            // Remove the <div> element
+            $(this).remove();
+        }
+    });
+
+});
+
+
+
+// Nav bar / Mega nav JS : START
+/**
+ * Adds an event listener for the 'resize' event on the window.
+ * When the window is resized, the padding-top CSS property of the body is set to the height of the element with the class 'ath-main-nav'.
+ */
+window.addEventListener("resize", function () {
+    let navbarHeight = document.querySelector('.ath-main-nav').offsetHeight;
+    document.body.style.paddingTop = navbarHeight + 'px';
+});
+
+/**
+ * Adds an event listener for the 'DOMContentLoaded' event on the document.
+ * When the DOM is fully loaded, the padding-top CSS property of the body is set to the height of the element with the class 'ath-main-nav'.
+ * If the element with the class 'ath-main-nav-autohide' exists, an event listener for the 'scroll' event on the window is added.
+ * When the window is scrolled, the 'ath-main-nav-scrolled-down' or 'ath-main-nav-scrolled-up' class is added to or removed from the 'ath-main-nav-autohide' element based on the scroll direction.
+ * An event listener for the 'click' event on the element with the id 'skipToContent' is also added.
+ * When this element is clicked, the focus is set to the element with the id 'connect-main-content'.
+ */
+document.addEventListener("DOMContentLoaded", function () {
+
+    let mainNavAutohide = document.querySelector('.ath-main-nav-autohide');
+    let navbarHeight = document.querySelector('.ath-main-nav').offsetHeight;
+    document.body.style.paddingTop = navbarHeight + 'px';
+
+    if (mainNavAutohide) {
+
+        let lastScrollTop = 0;
+        window.addEventListener('scroll', function () {
+            let scrollTop = window.scrollY;
+            if (scrollTop <= lastScrollTop) {
+                mainNavAutohide.classList.remove('ath-main-nav-scrolled-down');
+                mainNavAutohide.classList.add('ath-main-nav-scrolled-up');
+            } else {
+                mainNavAutohide.classList.remove('ath-main-nav-scrolled-up');
+                mainNavAutohide.classList.add('ath-main-nav-scrolled-down');
+            }
+            lastScrollTop = scrollTop;
+            if (lastScrollTop < 0) {
+                lastScrollTop = 0;
+            }
+        });
+    }
+
+    // Skip to main content
+    $("#skipToContent").on("click", function () {
+        $('#connect-main-content').focus();
+    });
+});
+// Nav bar / Mega nav JS : END
+
+
+/**
+ * Retrieves the value of a specified cookie.
+ *
+ * @param {string} cname - The name of the cookie.
+ * @returns {string} The value of the cookie, or an empty string if the cookie does not exist.
+ */
+function getCookie(cname) {
+    let name = cname + "=";
+    let decodedCookie = decodeURIComponent(document.cookie);
+    let cookieArray = decodedCookie.split(';');
+    for (let i = 0; i < cookieArray.length; i++) {
+        let c = cookieArray[i];
+        while (c.charAt(0) == ' ') {
+            c = c.substring(1);
+        }
+        if (c.indexOf(name) == 0) {
+            return c.substring(name.length, c.length);
+        }
+    }
+    return "";
+}
+
+/**
+* Deletes a cookie with the given name.
+*
+* @param {string} cname - The name of the cookie to delete.
+*/
+function deleteCookie(cname) {
+    document.cookie = cname + '=; expires=Thu, 01-Jan-70 00:00:01 GMT;';
+}
+
+/**
+* Formats a number as a currency string.
+*
+* If the number is positive or zero, it is formatted with two decimal places and commas as thousand separators, and prefixed with a dollar sign.
+* If the number is negative, it is formatted as a positive number and enclosed in parentheses.
+* If the number is null, a dash is returned.
+*
+* @param {number} nStr - The number to format.
+* @returns {string} The formatted currency string.
+*/
+function amountFormatter(nStr) {
+    if (nStr >= 0 && nStr != null) {
+        nStr = nStr.toFixed(2);
+        nStr += '';
+        let x = nStr.split('.');
+        let x1 = x[0];
+        let x2 = x.length > 1 ? '.' + x[1] : '.00';
+        let rgx = /(\d+)(\d{3})/;
+        while (rgx.test(x1)) {
+            x1 = x1.replace(rgx, '$1' + ',' + '$2');
+        }
+        return "$" + x1 + x2;
+    } else if (nStr < 0 && nStr != null) {
+        nStr = Math.abs(nStr).toLocaleString('en-US', {
+            style: 'currency',
+            currency: 'USD'
+        });
+        return "(" + nStr + ")";
+    } else return "—";
+}
+
+
+/**
+* Formats a string as a percentage.
+*
+* If the 'processdatetype' property of the row object is "P", a dash is returned.
+* If the string is not null, not an empty string, and not undefined, it is suffixed with a percentage sign.
+* Otherwise, an empty string is returned.
+*
+* @param {string} str - The string to format.
+* @param {Object} row - The row object.
+* @returns {string} The formatted string.
+*/
+function percentageFormater(str, row) {
+
+    if (row["processdatetype"] == "P") {
+        return "—";
+    }
+    if (str != null && str != "") {
+        return str + "%";
+    } else
+        return "";
+}
+
+/**
+* Formats a number by adding commas as thousand separators.
+*
+* @param {number} nStr - The number to format.
+* @returns {string} The formatted number.
+*/
+function addCommas(nStr) {
+    nStr += '';
+    let x = nStr.split('.');
+    let x1 = x[0];
+    let x2 = x.length > 1 ? '.' + x[1] : '';
+    let rgx = /(\d+)(\d{3})/;
+    while (rgx.test(x1)) {
+        x1 = x1.replace(rgx, '$1' + ',' + '$2');
+    }
+    return x1 + x2;
+}
+
+/**
+* Retrieves the value of a specified URL parameter.
+*
+* @param {string} name - The name of the URL parameter.
+*/
+$.urlParam = function (name) {
+    let results = new RegExp('[\\?&]' + name + '=([^&#]*)').exec(window.location.href);
+    if (results == null) {
+        return null;
+    }
+    return decodeURI(results[1]) || 0;
+}
+
+
+/**
+* Capitalizes the first letter of each word in a string.
+*
+* @param {string} string - The string to capitalize.
+* @return {string} The input string with the first letter of each word capitalized.
+*/
+function capitalize(string) {
+    return string.toLowerCase().replace(/\b(\w)/g, function (x) {
+        return x.toUpperCase();
+    })
+}
+
+/**
+* Escapes HTML special characters in a string.
+* @param {string} string - The string to escape.
+* @returns {string} The input string with HTML special characters escaped.
+*/
+function escapeHtml(string) {
+    let entityMap = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+        '/': '&#x2F;',
+        '`': '&#x60;',
+        '=': '&#x3D;'
+    };
+    return String(string).replace(/[&<>"'`=\/]/g, function (s) {
+        return entityMap[s];
+    });
+}
+
+/**
+* Masks a part of an email with a specified character.
+*
+* @param {string} email - The email to mask.
+* @param {string} mask_character - The character to use for masking.
+* @param {number} mask_start_position - The position in the email to start masking from.
+* @returns {string} The masked email.
+*/
+function getMaskedEmail(email, mask_character, mask_start_position) {
+    let emailSection = email.split('@');
+    let maskedEmail = '';
+    let mask = '';
+    let emailLength = emailSection[0].length;
+    let maskLength = 0;
+    if (emailLength > mask_start_position)
+        maskLength = emailLength - mask_start_position;
+
+    for (let i = 0; i < maskLength; i++)
+        mask = mask + mask_character;
+
+    if (emailLength > mask_start_position)
+        maskedEmail = emailSection[0].substring(0, mask_start_position) + mask + '@' + emailSection[1];
+    else
+        maskedEmail = emailSection[0].substring(0, emailLength) + mask + '@' + emailSection[1];
+    return maskedEmail;
+}
+
+/**
+* Sets a cookie with the given name and value.
+*
+* @param {string} cname - The name of the cookie.
+* @param {string} cvalue - The value of the cookie.
+* @param {number} exdays - The number of days until the cookie should expire.
+*/
+function setCookie(key, value, expiry, path) {
+    let expires = new Date();
+    expires.setTime(expires.getTime() + (expiry * 30 * 1000));
+    if (path == "") {
+        path = "/";
+    }
+    document.cookie = key + '=' + value + ';expires=' + expires.toUTCString() + ';Path=' + path;
+}
+
+
+let genericErrMsgs = Object.freeze({
+    'dateRange': 1,
+    'searchCriteria': 2,
+    'refreshScreen': 3,
+    'callPhone': 4,
+    'dateRangeRefresh': 5,
+    'searchCriteriaRefresh': 6,
+    'PleaseTryAgain': 7
+});
+
+/**
+* Returns a generic error message.
+*
+* @returns {string} The generic error message.
+*/
+function getGenericErrorMsg(msgId) {
+    switch (msgId) {
+        case 1:
+            return 'An error has occurred. Please shorten your date range and try again.';
+        case 2:
+            return 'An error has occurred. Please refine your search and try again.';
+        case 3:
+            return 'An error occurred. <a class="refreshErrLnk">Please refresh your page.</a> ';
+        case 4:
+            return "An error occurred. Please try again or call <a href='tel:888-266-8489' class='assistance-phone'>888-266-8489</a> for assistance.";
+        case 5:
+            return 'An error has occurred. <a class="refreshErrLnk">Please shorten your date range and try again.</a>';
+        case 6:
+            return 'An error has occurred. <a class="refreshErrLnk">Please refine your search and try again.</a>';
+        case 7:
+            return 'An error has occured. Please try again.';
+        case 8:
+            return "Account couldn't be created. Please check the information entered below or call <a href='tel:888-266-8489' class='assistance-phone'>888-266-8489</a> to create your account.";
+        case 9:
+            return "Something went wrong. Please try again later.";
+        default:
+            return 'An error occurred. <a class="refreshErrLnk">Please refresh your page.</a>';
+    }
+}
+
+
+/**
+* Loads binary files required for the application.
+*
+* @returns {Promise} A promise that resolves when all binaries have been loaded.
+*/
+function loadBinaries() {
+    if (window.location.pathname.startsWith("/producer")) {
+        $('img').each(function () {
+            if ($(this).attr("src").startsWith("/binaries")) {
+                $(this).attr("src", "/producer" + $(this).attr("src"));
+            }
+        });
+    }
+}
+
+/**
+ * Show Athene progress loader
+ */
+function ath_show_loader() {
+    $("#ath-loader").modal("show");
+}
+
+/**
+ * Hide Athene progress loader
+ */
+function ath_hide_loader() {
+    $("#ath-loader").modal("hide");
+}
+
+/**
+ * Shows a generic error div.
+ *
+ * @param {string} targetDiv - The id of the target div.
+ * @param {string} msgId - The id of the error message.
+ */
+function showGenericErrorDiv(targetDiv, msgId) {
+    $('#' + targetDiv).siblings('.genericErrDiv').remove();
+    let errDivHtml = `<div class="alert alert-danger d-flex genericErrDiv ath-analytics-alert-show" id="divGenericErrAlert" role="alert"><i class="text-warning fas fa-exclamation-triangle align-self-start me-3 fs-3 mt-n1"></i>
+                    <div class="alert-content">${getGenericErrorMsg(msgId)}</div>
+                  </div>`;
+
+    if ($('#' + targetDiv).siblings('.genericErrDiv').length == 0)
+        $('#' + targetDiv).before(errDivHtml);
+    $(".alert-content .refreshErrLnk").attr("href", location.href.split('#')[0]);
+}
+
+/**
+ * Hides a generic error div.
+ *
+ * @param {string} targetDiv - The id of the target div.
+ */
+function hideGenericErrorDiv(targetDiv) {
+    $(`#${targetDiv}`).remove();
+}
+
+/**
+ * Shows a generic error modal.
+ *
+ * @param {string} msgId - The id of the error message.
+ */
+function showGenericErrorModal(msgId) {
+    let errorMsg = getGenericErrorMsg(msgId);
+    if ($('#genericErrModal').length == 0) {
+        let errDiv = document.createElement('DIV');
+        errDiv.innerHTML = `<div class="modal fade athene-modal" id="genericErrModal" aria-hidden="true" style="display: none;">
+        <div class="modal-dialog modal-lg modal-dialog-top  modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    </div>
+                <div class="modal-body"> 
+                    <div class="alert alert-danger athene-alert" role="alert"> <i class="fas fa-exclamation-triangle"></i>
+                        <div class="alert-content">${errorMsg}</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" data-dismiss="modal">Close</button>
+                </div>
+            </div>
+            </div>
+        </div>`
+        document.getElementById('main-sections').appendChild(errDiv);
+    } else {
+        $('#genericErrModal .alert-content').html(errorMsg);
+    }
+    $('#genericErrModal').modal('show');
+}
+
+/**
+ * Checks if a value is valid.
+ * A value is considered valid if it is not null, 'null', undefined, or an empty string.
+ * It also checks if the value, when all whitespace is removed, has a length greater than 0.
+ *
+ * @param {any} value - The value to check.
+ * @returns {boolean} True if the value is valid, false otherwise.
+ */
+function isValidValue(value) {
+    value = String(value);
+    if (value == null || value == 'null' || value == undefined || value == '') value = '';
+    if (value.replace(/\s+/g, '').length > 0)
+        return true;
+    return false;
+}
+
+const handlePopupBlocker = (url) => {
+    let windowReference = window.open(url);
+    if (windowReference === null || typeof (windowReference) === "undefined") {
+        $('#urlText').text(url);
+        $('#urlText').parent().attr('title', url);
+        $('button#copyToClipboard').on('click', () => {
+            navigator.clipboard.writeText($('#urlText').parent().attr('title'));
+            $('#copiedDiv').removeClass("d-none");
+            $('#copiedDiv').attr("style", ""); //fadeOut adds style="display:none"
+            $('#copiedDiv').attr("role", "alert");
+            setTimeout(() => {
+                $('#copiedDiv').fadeOut();
+                $('#copiedDiv').removeAttr("role");
+            }, 2000); // 2000 milliseconds = 2 second
+        });
+        $('#popUpBlockerModal').modal('toggle');
+    } else {
+        windowReference.focus();
+    }
+};
+
+const resetPopupBlockerModal = () => {
+    $('#urlText').text('');
+    $('#urlText').parent().attr('title', '');
+    $('#copiedDiv').addClass("d-none");
+};

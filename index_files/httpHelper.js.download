@@ -1,0 +1,29 @@
+function post(url, type, data, contentType, isCrossDomain, callbackSuccess, callbackError, convertToLower){
+	if(convertToLower)
+		data = tolower(data);
+
+	$.ajax({
+	   type: type,
+	   url: url,
+	   contentType: contentType,
+	   crossDomain: isCrossDomain,
+	   data: JSON.stringify(data)
+	})
+	.done(function (data) { callbackSuccess(data); })
+	.fail(function (jqXHR, textStatus, errorThrown) { callbackError(jqXHR, textStatus, errorThrown); });
+}
+
+function tolower(data){
+	for (var key in data) {
+		if(data[key] != undefined || data[key] != null){
+			if(isNaN(data[key])){		
+				if(data[key] instanceof Object)
+					tolower(data[key]);
+				else{
+					data[key] = data[key].toLowerCase();
+				}
+			}
+		}
+	}
+	return data;
+}
